@@ -1,0 +1,167 @@
+// ===================== MOTOR PINS =====================
+const int ENA = 10;
+const int IN1 = 13;
+const int IN2 = 12;
+
+const int ENB = 9;
+const int IN3 = 11;
+const int IN4 = 8;
+
+// ===================== TCS3200 =====================
+const int S0_PIN  = A0;
+const int S1_PIN  = A1;
+const int S2_PIN  = A2;
+const int S3_PIN  = A3;
+const int OUT_PIN = A4;
+
+// ===================== ULTRASONIC =====================
+const int TRIG_PIN = 6;
+const int ECHO_PIN = 7;
+
+// ===================== SETTINGS =====================
+int BASE_SPEED = 150;
+int RED_MARGIN = 400;
+int OBSTACLE_DISTANCE = 20;
+
+// Timing (tune if needed)
+int TURN_90_TIME = 400;
+int FORWARD_CLEAR_TIME = 700;
+
+// ===================== COLOR =====================
+unsigned long readColorPulse(bool s2, bool s3) {
+  digitalWrite(S2_PIN, s2 ? HIGH : LOW);
+  digitalWrite(S3_PIN, s3 ? HIGH : LOW);
+  delayMicroseconds(100);
+  unsigned long pulse = pulseIn(OUT_PIN, LOW, 30000);
+  if (pulse == 0) pulse = 30000;
+  return pulse;
+}
+
+bool isRedLine() {
+  unsigned long r = readColorPulse(false, false);
+  unsigned long g = readColorPulse(true, true);
+  unsigned long b = readColorPulse(false, true);
+  return (g - r > RED_MARGIN) && (b - r > RED_MARGIN);
+}
+
+// ===================== ULTRASONIC =====================
+long getDistanceCM() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  long duration = pulseIn(ECHO_PIN, HIGH, 25000);
+  if (duration == 0) return 999;
+  return duration * 0.034 / 2;
+}
+
+// ===================== MOTORS =====================
+void motorsStop() {
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+}
+
+void motorsForward() {
+  analogWrite(ENA, BASE_SPEED);
+  analogWrite(ENB, BASE_SPEED);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void motorsTurnLeft() {
+  analogWrite(ENA, BASE_SPEED / 2);
+  analogWrite(ENB, BASE_SPEED);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void motorsTurnRight() {
+  analogWrite(ENA, BASE_SPEED);
+  analogWrite(ENB, BASE_SPEED / 2);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+// ===================== OBSTACLE AVOIDANCE =====================
+void avoidObstacle() {
+  motorsStop();
+  delay(150);
+
+  // 1. Turn left
+  motorsTurnLeft();
+  delay(TURN_90_TIME);
+
+  // 2. Go forward past obstacle
+  motorsForward();
+  delay(FORWARD_CLEAR_TIME);
+
+  // 3. Turn right
+  motorsTurnRight();
+  delay(TURN_90_TIME);
+
+  // 4. Move alongside obstacle
+  motorsForward();
+  delay(FORWARD_CLEAR_TIME);
+
+  // 5. Turn right again
+  motorsTurnRight();
+  delay(TURN_90_TIME);
+
+  // 6. Drive until red line is found again
+  while (!isRedLine()) {
+    motorsForward();
+  }
+
+  // 7. Re-align with line
+  motorsTurnLeft();
+  delay(TURN_90_TIME);
+}
+
+// ===================== SETUP =====================
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(S0_PIN, OUTPUT);
+  pinMode(S1_PIN, OUTPUT);
+  pinMode(S2_PIN, OUTPUT);
+  pinMode(S3_PIN, OUTPUT);
+  pinMode(OUT_PIN, INPUT);
+
+  digitalWrite(S0_PIN, HIGH);
+  digitalWrite(S1_PIN, LOW);
+
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  delay(1000);
+}
+
+// ===================== LOOP =====================
+void loop() {
+  if (getDistanceCM() < OBSTACLE_DISTANCE) {
+    avoidObstacle();
+    return;
+  }
+
+  if (isRedLine()) {
+    motorsForward();
+  } else {
+    motorsTurnRight();
+  }
+
+  delay(30);
+}
