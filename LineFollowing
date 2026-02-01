@@ -1,0 +1,145 @@
+const int ENA = 10;
+const int IN1 = 13;
+const int IN2 = 12;
+
+const int ENB = 9;
+const int IN3 = 11;
+const int IN4 = 8;
+
+// ===================== TCS3200 PINS =====================
+const int S0  = A0;
+const int S1  = A1;
+const int S2  = A2;
+const int S3  = A3;
+const int OUT = A4;
+const int OE  = A5;
+
+// ---- Thresholds (tune these for your setup) ----
+int RED_MIN = 0;         // not used much
+int RED_MAX = 2500;      // lower pulse = more red light
+int GREEN_MIN = 0;
+int GREEN_MAX = 4000;
+int BLUE_MIN = 0;
+int BLUE_MAX = 4000;
+
+// How strict we are about "red":
+// we expect RED_pulse < GREEN_pulse AND RED_pulse < BLUE_pulse by some margin
+int RED_MARGIN = 400;    // tune
+
+// Motor speed
+int BASE_SPEED = 150;    // 0–255
+
+// ---- Helper to read one color by setting S2,S3 and measuring pulse ----
+unsigned long readColorPulse(bool s2, bool s3) {
+  digitalWrite(S2_PIN, s2 ? HIGH : LOW);
+  digitalWrite(S3_PIN, s3 ? HIGH : LOW);
+  delayMicroseconds(100); // small settle time
+  unsigned long pulse = pulseIn(OUT_PIN, LOW, 30000); // timeout 30 ms
+  if (pulse == 0) pulse = 30000; // if timeout, treat as very low light
+  return pulse;
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(S0_PIN, OUTPUT);
+  pinMode(S1_PIN, OUTPUT);
+  pinMode(S2_PIN, OUTPUT);
+  pinMode(S3_PIN, OUTPUT);
+  pinMode(OUT_PIN, INPUT);
+
+  // Set TCS3200 scaling (S0,S1): HIGH,LOW = 20% (standard example)
+  digitalWrite(S0_PIN, HIGH);
+  digitalWrite(S1_PIN, LOW);
+
+  // Motor pins
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+
+  pinMode(ENB, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  // Optional: small delay for stabilization
+  delay(1000);
+}
+
+// ---- Motor control helpers ----
+void motorsStop() {
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+void motorsForward() {
+  analogWrite(ENA, BASE_SPEED);
+  analogWrite(ENB, BASE_SPEED);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void motorsTurnLeft() {
+  analogWrite(ENA, BASE_SPEED / 2); // left slower
+  analogWrite(ENB, BASE_SPEED);     // right faster
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+void motorsTurnRight() {
+  analogWrite(ENA, BASE_SPEED);
+  analogWrite(ENB, BASE_SPEED / 2);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+}
+
+// ---- Detect if current surface is "red line" ----
+bool isRedLine() {
+  // TCS3200: 
+  // Red  = S2 LOW,  S3 LOW
+  // Green= S2 HIGH, S3 HIGH
+  // Blue = S2 LOW,  S3 HIGH
+  unsigned long rPulse = readColorPulse(false, false);
+  unsigned long gPulse = readColorPulse(true,  true);
+  unsigned long bPulse = readColorPulse(false, true);
+
+  // Debug
+  Serial.print("R="); Serial.print(rPulse);
+  Serial.print(" G="); Serial.print(gPulse);
+  Serial.print(" B="); Serial.println(bPulse);
+
+  // Basic sanity clamp
+  if (rPulse > RED_MAX)   rPulse = RED_MAX;
+  if (gPulse > GREEN_MAX) gPulse = GREEN_MAX;
+  if (bPulse > BLUE_MAX)  bPulse = BLUE_MAX;
+
+  // On TCS3200: LOWER pulse => HIGHER intensity.
+  // We say "red" if red intensity is significantly stronger (smaller pulse)
+  // than green and blue.
+  bool redDominant = (gPulse - rPulse > RED_MARGIN) && (bPulse - rPulse > RED_MARGIN);
+
+  return redDominant;
+}
+
+void loop() {
+  bool onRed = isRedLine();
+
+  if (onRed) {
+    // If sensor is over red line, go forward
+    motorsForward();
+  } else {
+    // Not on red: simple search behavior (e.g., turn right)
+    motorsTurnRight();
+  }
+
+  delay(30); // small loop delay
+}
